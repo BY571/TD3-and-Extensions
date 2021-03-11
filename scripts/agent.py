@@ -1,8 +1,7 @@
-
 import torch
 import numpy as np
 import random
-from networks import Actor, Critic
+from .networks import Actor, Critic
 import torch.optim as optim
 import torch.nn.functional as F
 
@@ -84,7 +83,7 @@ class TD3_Agent():
         state = torch.from_numpy(state).float().to(self.device)
         mu = self.actor_local(state)
         action = mu + torch.normal(mean=torch.FloatTensor([0.]),
-                                        std=torch.FloatTensor([0.1])).to(mu.device)
+                                   std=torch.FloatTensor([0.1])).to(mu.device)
         return action.detach().cpu()[0]
     
     def eval(self, state):
