@@ -9,17 +9,12 @@ class TD3_Agent():
     """Interacts with and learns from the environment."""
     
     def __init__(self,
+                 args,
                  state_size,
                  action_size,
                  action_low,
                  action_high,
                  replay_buffer,
-                 batch_size,
-                 random_seed,
-                 lr,
-                 hidden_size,
-                 gamma,
-                 tau,
                  device):
         """Initialize an Agent object
 
@@ -39,29 +34,32 @@ class TD3_Agent():
         self.action_size = action_size
         self.action_low = action_low
         self.action_high = action_high
-        self.seed = random.seed(random_seed)
+        self.seed = args.seed
+        random.seed(args.seed)
+        hidden_size = args.layer_size
         
-        self.gamma = gamma
-        self.tau = tau
-        self.batch_size = batch_size
+        self.nstep = args.nstep
+        self.gamma = args.gamma
+        self.tau = args.tau
+        self.batch_size = args.batch_size
                 
         print("Using: ", device)
         self.device = device
         self.iter = 1
         
         # Actor Network 
-        self.actor_local = Actor(state_size, action_size, random_seed, hidden_size=hidden_size).to(device)
-        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=lr)     
+        self.actor_local = Actor(state_size, action_size, self.seed, hidden_size=hidden_size).to(device)
+        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=args.lr)     
         
         # Critic Network (w/ Target Network)
 
-        self.critic1 = Critic(state_size, action_size, random_seed, hidden_size=hidden_size).to(device)
-        self.critic2 = Critic(state_size, action_size, random_seed+1, hidden_size=hidden_size).to(device)
-        self.target_critic1 = Critic(state_size, action_size, random_seed, hidden_size=hidden_size).to(device)
-        self.target_critic2 = Critic(state_size, action_size, random_seed+1, hidden_size=hidden_size).to(device)
+        self.critic1 = Critic(state_size, action_size, self.seed, hidden_size=hidden_size).to(device)
+        self.critic2 = Critic(state_size, action_size, self.seed+1, hidden_size=hidden_size).to(device)
+        self.target_critic1 = Critic(state_size, action_size, self.seed, hidden_size=hidden_size).to(device)
+        self.target_critic2 = Critic(state_size, action_size, self.seed+1, hidden_size=hidden_size).to(device)
 
-        self.optimizer1 = optim.Adam(self.critic1.parameters(), lr=lr, weight_decay=0)
-        self.optimizer2 = optim.Adam(self.critic2.parameters(), lr=lr, weight_decay=0)
+        self.optimizer1 = optim.Adam(self.critic1.parameters(), lr=args.lr, weight_decay=0)
+        self.optimizer2 = optim.Adam(self.critic2.parameters(), lr=args.lr, weight_decay=0)
 
         # Replay memory
         self.memory = replay_buffer
@@ -103,7 +101,7 @@ class TD3_Agent():
         ======
             experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples 
         """
-        states, actions, rewards, next_states, dones = experiences
+        states, actions, rewards, next_states, dones, idxs, weights = experiences
 
        
 
@@ -124,14 +122,17 @@ class TD3_Agent():
             # take the min of both critics for updating
             Q_target_next = torch.min(Q_target1_next, Q_target2_next)
 
-        Q_targets = rewards.cpu() + (self.gamma * (1 - dones.cpu()) * Q_target_next.cpu())
+        Q_targets = rewards.cpu() + (self.gamma**self.nstep * (1 - dones.cpu()) * Q_target_next.cpu())
 
         # Compute critic losses and update critics 
 
         Q1 = self.critic1(states, actions).cpu()
         Q2 = self.critic2(states, actions).cpu()
-        Q1_loss = 0.5*F.mse_loss(Q1, Q_targets)
-        Q2_loss = 0.5*F.mse_loss(Q2, Q_targets)
+        td_error1 = Q_targets-Q1
+        td_error2 = Q_targets-Q2
+        Q1_loss = 0.5* (td_error1.pow(2)*weights).mean()
+        Q2_loss = 0.5* (td_error2.pow(2)*weights).mean()
+        prios = abs((torch.min(td_error1, td_error2)+1e-5)).squeeze().detach()
     
         # Update critic
         self.optimizer1.zero_grad()
@@ -140,7 +141,7 @@ class TD3_Agent():
         Q2_loss.backward()
         self.optimizer1.step()
         self.optimizer2.step()
-
+        self.memory.update_priorities(idxs, prios.data.cpu().numpy())
 
         # ---------------------------- update actor ---------------------------- #
         if self.iter % 2 == 0:
@@ -151,7 +152,7 @@ class TD3_Agent():
             #Q2 = self.critic2(states, actions_pred.squeeze(0)).cpu()
             #Q = torch.min(Q1,Q2)
 
-            actor_loss =  -(Q1).mean() # * weights
+            actor_loss =  -(Q1* weights).mean() # * weights
             # Optimize the actor loss
             self.actor_optimizer.zero_grad()
             actor_loss.backward()

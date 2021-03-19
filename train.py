@@ -1,4 +1,4 @@
-from scripts.buffer import ReplayBuffer
+from scripts.buffer import ReplayBuffer, PrioritizedReplay
 import gym
 import random
 import numpy as np 
@@ -110,6 +110,8 @@ parser.add_argument("--collect_random", type=int, default=5_000, help="Collect t
 parser.add_argument("--eval_every", type=int, default=10_000, help="Number of interactions after which the evaluation runs are performed, default = 10.000")
 parser.add_argument("--eval_runs", type=int, default=1, help="Number of evaluation runs performed, default = 1")
 parser.add_argument("--seed", type=int, default=0, help="Seed for the env and torch network weights, default is 0")
+parser.add_argument("--nstep", type=int, default=1, help="Using Multistep Q-Learning, default n-step is 1")
+parser.add_argument("--per", type=int, default=0, choices=[0,1], help="Using Prioritized Experience Replay if set to 1, default is 0")
 parser.add_argument("--lr", type=float, default=3e-4, help="Actor learning rate of adapting the network weights, default is 3e-4")
 parser.add_argument("--layer_size", type=int, default=256, help="Number of nodes per neural network layer, default is 256")
 parser.add_argument("--replay_memory", type=int, default=int(1e6), help="Size of the Replay memory, default is 1e6")
@@ -137,19 +139,29 @@ if __name__ == "__main__":
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.shape[0]
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    replay_buffer = ReplayBuffer(action_size, args.replay_memory, args.batch_size, seed, device)
-    agent = TD3_Agent(state_size=state_size,
+    if args.per == 0:
+        replay_buffer = ReplayBuffer(buffer_size=args.replay_memory,
+                                    batch_size=args.batch_size,
+                                    seed=seed,
+                                    gamma=args.gamma,
+                                    n_step=args.nstep,
+                                    device=device)
+    else:
+        replay_buffer = PrioritizedReplay(capacity=args.replay_memory,
+                                          batch_size=args.batch_size,
+                                          device=device,
+                                          seed=seed,
+                                          gamma=args.gamma,
+                                          beta_frames=args.steps,
+                                          n_step=args.nstep)
+    agent = TD3_Agent(args=args,
+                state_size=state_size,
                 action_size=action_size,
                 action_low=action_low,
                 action_high=action_high,
                 replay_buffer=replay_buffer,
-                batch_size=args.batch_size,
-                random_seed=seed,
-                lr=args.lr,
-                hidden_size=args.layer_size,
-                gamma=args.gamma,
-                tau=args.tau,
-                device=device)
+                device=device
+                )
 
     fill_buffer(agent, env=env, samples=args.collect_random)
     
