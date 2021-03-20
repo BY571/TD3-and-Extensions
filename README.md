@@ -6,6 +6,9 @@
 Pendulum-v0:
 ![Pendulum-nstep-PER](/imgs/Pendulum-v0.png)
 
+![LunarLanderContinuous-v2](/imgs/LunarLanderContinuous-v2.png)
+
+
 # Results
 
 
